@@ -1,0 +1,147 @@
+---
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+::: callout-important
+Pour télécharger le fichier: [regex.qmd](/assets/fichier/_regex.qmd)
+:::
+
+## À la découverte des expressions régulières avec R (et d'autres packages au passage...)
+
+Les **expressions régulières** sont communément appelées **regex** ou
+**regexp** pour **regular expressions** en anglais. Selon Wikipédia, une
+expression régulière est "une chaîne de caractères, qui décrit, selon
+une syntaxe précise, un ensemble de chaînes de caractères possibles". Si
+vous n'avez jamais entendu parlé des regex, il se peut que cette
+définition ne vous aide pas à comprendre le concept. Nous tenterons de
+démystifier le tout au cours de ces exercices.
+
+À titre de rappel, cet
+[aide-mémoire](https://raw.githubusercontent.com/rstudio/cheatsheets/main/translations/french/regex_fr.pdf)
+vous sera drôlement utile!
+
+En résumé, ces expressions permettent de décrire des motifs (patterns) à
+l'aide de formules "*relativement simples*" pour trouver, valider,
+extraire ou modifier du texte ou des nombres.
+
+## Mission d'aujourd'hui:
+
+Récolter le plus d'information possible qui se trouve dans les tableaux
+de la page suivante:
+<https://tc.canada.ca/fr/aviation/exploitation-aeroports-aerodromes/liste-aeroports-appartenant-transports-canada>.
+
+```{r import}
+library(tidyverse)
+library(magrittr)
+library(rvest)
+
+```
+
+```{r}
+URL <- "https://tc.canada.ca/fr/aviation/exploitation-aeroports-aerodromes/liste-aeroports-appartenant-transports-canada"
+```
+
+### Début de solution en base R
+
+```{r}
+base_raw_html <- read_html(x = URL)
+base_html_table <- html_elements(x = base_raw_html, css = "table")
+base_tables <- html_table(x = base_html_table)
+
+# base_table <- rbind(base_tables[[1]], base_tables[[2]], base_tables[[3]])
+
+
+
+```
+
+⚠️ Erreur! Une colonne n'est pas nommée de façon identique, donc ne
+fonctionne pas... Corrigeons la situation
+
+```{r}
+
+names(base_tables[[3]])[1] <- "Province/Territoire"
+
+base_table <- rbind(base_tables[[1]], base_tables[[2]], base_tables[[3]])
+
+base_table
+
+# Solution en Base R
+base_table$`Province/Territoire` <- ifelse(test = is.na(base_table$`Province/Territoire`),
+                                  yes = base_table$Territoire, no = base_table$`Province/Territoire`)
+base_table$Territoire <- NULL
+
+rm(list=(ls(pattern = "base*")))
+```
+
+## Solution à la Tidyverse
+
+```{r}
+
+URL <- "https://tc.canada.ca/fr/aviation/exploitation-aeroports-aerodromes/liste-aeroports-appartenant-transports-canada"
+
+# raw_html <- read_html(x = URL)
+# html_table <- html_elements(x = raw_html, css = "table")
+# base_tables <- html_table(x = html_table)
+
+tables_pipe <- read_html(x = URL) %>%
+html_elements(css = "table") %>%
+html_table()
+
+table_pipe <- dplyr::bind_rows(tables_pipe[[1]], tables_pipe[[2]], tables_pipe[[3]], .id = "type")
+
+table_pipe <- table_pipe %>% dplyr::rename(prov_territ = `Province/Territoire`,
+                            aeroport = `Aéroport`,
+                            exploitE_par = `Exploité par`,
+                            territoire = Territoire)
+
+
+# https://tidyr.tidyverse.org/reference/unite.html
+# ou alors dplyr::coalesce
+
+# https://tidyr.tidyverse.org/reference/fill.html
+
+table_pipe <- table_pipe %>% dplyr::na_if(y = "") %>% 
+  unite(col = prov_territ, 
+        prov_territ, territoire, na.rm = TRUE) %>%
+  dplyr::na_if(y = "") %>%
+  tidyr::fill(prov_territ, .direction = "down") 
+  
+
+print(as.data.frame(table_pipe))
+
+
+
+
+```
+
+## Un peu de regex
+
+Allons extraire les codes d'aéroports. 3 solutions :
+
+```{r}
+
+table_pipe2 <- mutate(table_pipe, .keep="all", new_col = str_extract_all(string = aeroport, pattern = "\\([A-Z][A-Z][A-Z]\\)"))        # = "\\([A-Z]{3}\\)"
+
+table_pipe3 <- mutate(table_pipe, .keep="all", new_col = str_extract(string = aeroport, pattern = "\\([A-Z][A-Z][A-Z]\\)"))        # = "\\([A-Z]{3}\\)"
+
+table_pipe4 <- tidyr::extract(data = table_pipe, col = aeroport, into = "code", regex = "([A-Z]{3})", remove = FALSE)
+```
+
+Et supprimons-les des noms de villes :
+
+```{r}
+
+table_pipe5 <- table_pipe4
+table_pipe5$aeroport <- 
+  table_pipe5$aeroport %>% stringr::str_remove_all(pattern = " \\([A-Z]{3}\\)")
+# au lieu d'inclure l'espace dans l'expression régulière, nous aurions pu utiliser str_squish
+```
+
+Spécifions les types :
+
+```{r}
+
+table_pipe6 <- table_pipe5 %>% mutate(type = recode(type, "1" = "Petits", "2" = "Nationaux", "3" = "Nationaux exploités admin"))
+```

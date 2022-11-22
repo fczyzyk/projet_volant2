@@ -1,0 +1,19 @@
+project:
+  type: website
+
+website:
+  title: "todayyy"
+  navbar:
+    left:
+      - href: index.qmd
+#      - href: regex.qmd
+        text: CeCi
+#      - about.qmd
+      - regex.qmd
+      - text: changer le titre
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
